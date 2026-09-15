@@ -1,8 +1,13 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-import random
+from groq import Groq
+import os
+import json
 
 app = FastAPI(title="TarabaInsight AI Microservice")
+
+# Initialize Groq client using the API key from Render Environment Variables
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 class AnalysisRequest(BaseModel):
     report_id: str
@@ -12,40 +17,40 @@ class AnalysisRequest(BaseModel):
 @app.post("/analyze")
 async def analyze_report(request: AnalysisRequest):
     """
-    Lightweight, rule-based AI engine for instant, free, and reliable intelligence grading.
+    Advanced AI Engine using Groq (Llama 3) for deep intelligence analysis.
     """
-    desc_lower = request.description.lower()
+    prompt = f"""
+    You are an expert intelligence analyst for Taraba State, Nigeria. 
+    Analyze the following citizen report:
     
-    # 1. Determine Urgency Level based on keywords
-    urgency_keywords = ['bomb', 'attack', 'urgent', 'critical', 'danger', 'kill', 'fire', 'flood', 'clash', 'militant']
-    urgency = 'CRITICAL' if any(kw in desc_lower for kw in urgency_keywords) else 'MODERATE'
-    
-    # 2. Determine Sentiment
-    negative_keywords = ['bad', 'terrible', 'danger', 'attack', 'destroyed', 'failed']
-    sentiment = 'NEGATIVE' if any(kw in desc_lower for kw in negative_keywords) else 'NEUTRAL'
-    
-    # 3. Calculate Confidence Score (Simulated high confidence for structured intel)
-    confidence = round(random.uniform(0.78, 0.96), 2)
-    
-    # 4. Refine Suggested Category based on context
-    suggested_category = request.issue_category
-    if 'road' in desc_lower or 'bridge' in desc_lower or 'market' in desc_lower:
-        suggested_category = 'Infrastructure Damage'
-    elif 'farm' in desc_lower or 'crop' in desc_lower or 'cattle' in desc_lower:
-        suggested_category = 'Agricultural Crisis'
-    elif 'health' in desc_lower or 'hospital' in desc_lower or 'disease' in desc_lower:
-        suggested_category = 'Public Health Issue'
+    Category: {request.issue_category}
+    Description: {request.description}
 
-    # 5. Extract Mock Entities (Can be upgraded to spaCy/NLTK later)
-    entities = {
-        "locations": ["Taraba State"], 
-        "keywords": request.issue_category.split()
-    }
+    Provide your analysis in STRICT JSON format with these exact keys:
+    - "ai_suggested_category": (String) Refined category (e.g., Security Threat, Agricultural Crisis).
+    - "ai_confidence_score": (Float between 0.0 and 1.0) Your confidence level.
+    - "sentiment": (String) "NEGATIVE", "NEUTRAL", or "POSITIVE".
+    - "urgency_level": (String) "CRITICAL", "MODERATE", or "LOW".
+    - "extracted_entities": (Object) containing "locations" (List of strings) and "keywords" (List of strings).
 
-    return {
-        "ai_suggested_category": suggested_category,
-        "ai_confidence_score": confidence,
-        "sentiment": sentiment,
-        "urgency_level": urgency,
-        "extracted_entities": entities
-    }
+    Do not include markdown formatting like ```json, just output the raw JSON object.
+    """
+
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192", # Blazing fast, free model
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+
+        response_content = chat_completion.choices[0].message.content
+        
+        # Clean up any accidental markdown formatting from the LLM
+        if response_content.startswith("```json"):
+            response_content = response_content.replace("```json", "").replace("```", "").strip()
+            
+        return json.loads(response_content)
+
+    except Exception as e:
+        return {"error": str(e), "ai_suggested_category": request.issue_category, "urgency_level": "MODERATE"}
