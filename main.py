@@ -39,7 +39,7 @@ async def analyze_report(request: AnalysisRequest):
     try:
         chat_completion = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.1-70b-versatile", # Groq's most stable, long-term supported model
+            meta-llama/llama-prompt-guard-2-22m
             temperature=0.3,
             response_format={"type": "json_object"}
         )
