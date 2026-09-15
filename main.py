@@ -1,14 +1,13 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import os
-import requests
 import json
+from huggingface_hub import InferenceClient
 
 app = FastAPI(title="TarabaInsight AI Microservice")
 
-# Hugging Face API endpoint (using Phi-3-mini, a powerful free model)
-API_URL = "https://api-inference.huggingface.co/models/microsoft/Phi-3-mini-4k-instruct"
-headers = {"Authorization": f"Bearer {os.environ.get('HUGGINGFACE_API_KEY')}"}
+# Initialize the official HF client (handles DNS and routing automatically)
+client = InferenceClient(token=os.environ.get('HUGGINGFACE_API_KEY'))
 
 class AnalysisRequest(BaseModel):
     report_id: str
@@ -17,7 +16,7 @@ class AnalysisRequest(BaseModel):
 
 @app.post("/analyze")
 async def analyze_report(request: AnalysisRequest):
-    prompt = f"""You are an intelligence analyst for Taraba State. Analyze this report and respond in valid JSON format ONLY:
+    prompt = f"""You are an intelligence analyst for Taraba State. Analyze this report and respond in valid JSON format ONLY. Do not include any text outside the JSON.
 
 Category: {request.issue_category}
 Description: {request.description}
@@ -42,21 +41,22 @@ Example output:
 }}"""
 
     try:
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            json={"inputs": prompt, "parameters": {"max_new_tokens": 500, "temperature": 0.3, "return_full_text": False}},
-            timeout=15
+        # Use the official client which handles the network routing perfectly
+        response = client.chat_completion(
+            model="microsoft/Phi-3-mini-4k-instruct",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.3
         )
         
-        result = response.json()[0]['generated_text']
+        result = response.choices[0].message.content
         
-        # Clean up the response to extract JSON
+        # Clean up markdown if the LLM adds it
         if "```json" in result:
             result = result.split("```json")[1].split("```")[0].strip()
         elif "```" in result:
             result = result.split("```")[1].split("```")[0].strip()
-        
+            
         return json.loads(result)
         
     except Exception as e:
