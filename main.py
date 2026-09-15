@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import os
+import requests
 import json
-from huggingface_hub import InferenceClient
 
 app = FastAPI(title="TarabaInsight AI Microservice")
 
-# Initialize the official HF client (handles DNS and routing automatically)
-client = InferenceClient(token=os.environ.get('HUGGINGFACE_API_KEY'))
+# Google Gemini API Configuration
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
 
 class AnalysisRequest(BaseModel):
     report_id: str
@@ -16,48 +17,38 @@ class AnalysisRequest(BaseModel):
 
 @app.post("/analyze")
 async def analyze_report(request: AnalysisRequest):
-    prompt = f"""You are an intelligence analyst for Taraba State. Analyze this report and respond in valid JSON format ONLY. Do not include any text outside the JSON.
+    prompt = f"""You are an expert intelligence analyst for Taraba State, Nigeria. 
+    Analyze the following citizen report and respond ONLY with a valid JSON object. Do not include markdown formatting like ```json.
 
-Category: {request.issue_category}
-Description: {request.description}
+    Category: {request.issue_category}
+    Description: {request.description}
 
-Provide JSON with these exact keys:
-- "ai_suggested_category": (string) refined category
-- "ai_confidence_score": (float between 0.0 and 1.0)
-- "sentiment": (string) "NEGATIVE", "NEUTRAL", or "POSITIVE"
-- "urgency_level": (string) "CRITICAL", "MODERATE", or "LOW"
-- "extracted_entities": (object) with "locations" (array) and "keywords" (array)
+    Provide JSON with these exact keys:
+    - "ai_suggested_category": (string) Refined category.
+    - "ai_confidence_score": (float between 0.0 and 1.0) Your confidence level.
+    - "sentiment": (string) "NEGATIVE", "NEUTRAL", or "POSITIVE".
+    - "urgency_level": (string) "CRITICAL", "MODERATE", or "LOW".
+    - "extracted_entities": (object) containing "locations" (List of strings) and "keywords" (List of strings).
+    """
 
-Example output:
-{{
-  "ai_suggested_category": "Security Threat",
-  "ai_confidence_score": 0.92,
-  "sentiment": "NEGATIVE",
-  "urgency_level": "CRITICAL",
-  "extracted_entities": {{
-    "locations": ["Jalingo", "market"],
-    "keywords": ["militants", "attack"]
-  }}
-}}"""
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 500}
+    }
 
     try:
-        # Use the official client which handles the network routing perfectly
-        response = client.chat_completion(
-            model="microsoft/Phi-3-mini-4k-instruct",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500,
-            temperature=0.3
-        )
+        response = requests.post(API_URL, json=payload, timeout=15)
+        response.raise_for_status()
         
-        result = response.choices[0].message.content
+        result_text = response.json()['candidates'][0]['content']['parts'][0]['text']
         
-        # Clean up markdown if the LLM adds it
-        if "```json" in result:
-            result = result.split("```json")[1].split("```")[0].strip()
-        elif "```" in result:
-            result = result.split("```")[1].split("```")[0].strip()
+        # Clean up if Gemini adds markdown
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0].strip()
             
-        return json.loads(result)
+        return json.loads(result_text)
         
     except Exception as e:
         print(f"Error: {e}")
